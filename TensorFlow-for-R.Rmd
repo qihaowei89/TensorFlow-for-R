@@ -1,0 +1,192 @@
+---
+title: "TensorFlow-for-R"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = F,eval = F      ,message = F,cache=TRUE)
+```  
+### **R interface to Keras**
+TensorFlow 是一个用于机器智能的开源软件库。TensorFlow的R接口允许您使用高级Keras和Estimator API高效地工作，并且当您需要更多控制时，提供对核心TensorFlow API的完全访问：  
+
+***
+
+![](keras-logo-2018-large-1200.png)  
+[**Keras API**](https://tensorflow.rstudio.com/keras)  
+Keras是一个高层次的神经网络API，重点在于实现快速实验。能够以最少的延迟从想法到结果是进行良好研究的关键。Keras具有以下主要特征：  
+
+1. 相同的代码在CPU上或GPU上无缝运行。 
+2. 用户友好的API，这使得很容易快速还原深学习模型。  
+3. 内置对卷积网络（用于计算机视觉）、递归网络（用于序列处理）以及支持二者的任何组合。  
+4. 支持任意的网络体系结构：多输入或多输出模型、层共享、模型共享等。这意味着Keras适合于构建基本上任何深度学习模型，从存储网络到神经图灵机。  
+5. 能够在包括TensorFlow、CNTK或TeaNo在内的多个后端上运行。  
+
+
+***  
+
+有关为什么您可以考虑使用Keras进行深入学习项目的详细信息，参考: [Why Use Keras?](https://tensorflow.rstudio.com/keras/articles/why_use_keras.html) or [为什么要使用Keras](_Why_Use_Keras.html)  
+
+本网站为Keras提供了与R交互界面的文档。有关项目的其他信息，请参见Keras网站 [https://keras.io](https://keras.io/)。  
+
+### **入门**  
+#### **安装**  
+
+首先，从GitHub安装Keras R包：  
+```{r eval=FALSE, include=FALSE}
+# install.packages("devtools")
+# devtools::install_github("rstudio/keras")
+```  
+默认情况下，Keras R接口使用[TensorFlow](https://www.tensorflow.org/)后端引擎。要同时安装Keras核心库和TensorFlow后端，使用安装程序`install_keras()`函数： 
+
+```{r}
+library(keras)
+# install_keras(method = "conda",tensorflow = "gpu")
+```
+这将默认为您提供的基于CPU的Keras和TensorFlow安装,如果你想要更多的定制安装，如你想利用NVIDIA GPU，参考`install_keras()`文档。  
+
+#### **学习Keras**  
+下面我们介绍一个使用Keras来识别[MNIST](https://en.wikipedia.org/wiki/MNIST_database)数据集中手写数字的简单例子。在熟悉基础知识之后，查看本网站上的[教程](https://tensorflow.rstudio.com/keras/#tutorials)和其他[学习资源](https://tensorflow.rstudio.com/keras/#learning-more)。  
+
+由Franois Chollet（Keras的创始人）所著的《 Deep Learning with R》一书对Keras以及深度学习的概念和实践提供了更全面的介绍。  
+
+还可下载Keras的深度学习[Keras cheat sheet](keras.pdf)，这是对Keras所有功能的快速高级参考  
+
+**MNIST实例**  
+我们可以通过简单的例子来学习Keras的基本知识：从MNIST数据集中识别手写数字。MNIST包括28×28灰度数字的手写数字，像这样：  
+![](MNIST.png)  
+
+数据集还包括每个图像的标签，告诉我们它是哪个数字。例如，上述图像的标签是5, 0, 4和1。  
+**准备数据**  
+MNIST数据集包含在Keras包中，可以使用`dataset_mnist()`函数访问.在这里，我们加载数据集，然后为我们的测试和训练数据创建变量：
+
+```{r}
+library(keras)
+# mnist <- dataset_mnist()
+load("dataset/mnist.RData")
+x_train <- mnist$train$x
+y_train <- mnist$train$y
+x_test <- mnist$test$x
+y_test <- mnist$test$y
+```
+
+x数据是灰度值的3-D阵列（图像、宽度、高度）。为了准备用于训练的数据，我们通过将宽度和高度整形为单维（将28x28幅图像平坦化为长度784矢量）将三维阵列转换为矩阵。然后，我们将介于0到255之间的整数的灰度值转换成介于0和1之间的浮点值：  
+```{r}
+# reshape
+x_train <- array_reshape(x_train, c(nrow(x_train), 784))
+x_test <- array_reshape(x_test, c(nrow(x_test), 784))
+# rescale
+x_train <- x_train / 255
+x_test <- x_test / 255
+```
+
+请注意，我们使用的是`array_reshape()`函数，而不是`dim<-()`函数来重构数组。这样就可以使用行主要语义（与R的默认列主要语义相反）重新解释数据，而行主要语义又与Keras调用的数值库解释数组维度的方式兼容。  
+
+y是一个整数向量，其取值范围为0至9。准备用于训练的数据，使用`Keras_to_categorical()`函数将向量[`one-hot-encode`](https://www.quora.com/What-is-one-hot-encoding-and-when-is-it-used-in-data-science)编码为二进制类矩阵：
+```{r}
+y_train <- to_categorical(y_train, 10)
+y_test <- to_categorical(y_test, 10)
+```
+
+
+**定义模型**  
+Keras的核心数据结构是一种模型，一种组织层的方法。最简单的模型是[顺序模型](https://keras.rstudio.com/articles/sequential_model.html)，线性层叠。
+
+我们首先创建一个顺序模型，然后使用管道（`%>%`）操作符添加层：  
+```{r}
+model <- keras_model_sequential() 
+model %>% 
+  layer_dense(units = 256, activation = 'relu', input_shape = c(784)) %>% 
+  layer_dropout(rate = 0.4) %>% 
+  layer_dense(units = 128, activation = 'relu') %>%
+  layer_dropout(rate = 0.3) %>%
+  layer_dense(units = 10, activation = 'softmax')
+```
+
+第一层的`input_shape`参数指定输入数据的形状（表示784数字向量的灰度图像）。最后一层使用[SoftMax激活函数](https://en.wikipedia.org/wiki/Softmax_function)输出长度为10的数字向量（每个数字的概率）。  
+
+使用`summary()`函数打印模型的细节： 
+```{r}
+summary(model)
+```
+
+接下来，用适当的损失函数、优化器和度量来编译模型：   
+```{r}
+model %>% compile(
+  loss = 'categorical_crossentropy',
+  optimizer = optimizer_rmsprop(),
+  metrics = c('accuracy')
+)
+```
+
+**模型训练与评估**  
+使用`fit()`函数使用包含128个图像的batch-size来训练30个epoch的模型：  
+
+```{r}
+history <- model %>% fit(
+  x_train, y_train, 
+  epochs = 30, batch_size = 128, 
+  validation_split = 0.2
+)
+
+```
+`fit()`函数返回的`history`对象中包含用于绘图的模型的loss和accuray指标。  
+
+```{r}
+plot(history)
+```   
+
+使用测试数据评估模型性能：  
+```{r}
+model %>% evaluate(x_test, y_test)
+```
+
+利用新数据的进行预测：
+```{r echo=TRUE,eval=F}
+model %>% predict_classes(x_test)
+```
+
+Keras能构建简单、优雅、直观的深度学习模型。构建问答系统、图像分类模型、神经图灵机或任何其他模型同样简单    
+
+**教程**   
+学习Keras的基本知识，我们推荐以下教程:  
+
+  + [基本分类](https://tensorflow.rstudio.com/keras/articles/tutorial_basic_classification.html) - 本教程中，我们训练的神经网络模型用于服装类，衬衫和运动鞋的图像分类
+  + [文本分类](https://tensorflow.rstudio.com/keras/articles/tutorial_basic_text_classification.html) - 本教程根据影评的文本内容将电影评论分类为正面或负面。
+  + [基础回归](https://tensorflow.rstudio.com/keras/articles/tutorial_basic_regression.html) - 本教程建立了一个模型来预测波士顿郊区在20世纪70年代中期的房价中值。
+  + [过拟合与欠拟合](https://tensorflow.rstudio.com/keras/articles/tutorial_overfit_underfit.html) - 在本教程中，我们探索两种常见的规则化技术（weight regularization and dropout），并使用它们来改进我们的电影评论分类结果。
+  + [保存和恢复模型](https://tensorflow.rstudio.com/keras/articles/tutorial_save_and_restore.html) - 本教程演示了保存和共享模型的各种方法（以及在训练过程中）。   
+  
+这些教程将带领您浏览Keras库的主要组件，并演示用于训练和提高神经网络性能的核心工作流。[Keras基础指南](https://tensorflow.rstudio.com/keras/articles/guide_keras.html)提供了一个更加简练总结。
+
+
+[基于Keras的深度学习](https://github.com/rstudio/cheatsheets/raw/master/keras.pdf)备忘录还提供了使用Keras的浓缩高级指南。   
+
+**学习更多**  
+要了解更多关于Keras，你可以查看这些文章：  
+
+  + [序贯模型指南](https://tensorflow.rstudio.com/keras/articles/sequential_model.html)   
+  + [函数API指南](https://tensorflow.rstudio.com/keras/articles/functional_api.html)
+  + [常见问题](https://tensorflow.rstudio.com/keras/articles/faq.html)
+  + [训练可视化](https://tensorflow.rstudio.com/keras/articles/training_visualization.html)
+  + [使用预先训练的模型](https://tensorflow.rstudio.com/keras/articles/applications.html)
+  + [Keras with Eager Execution](https://tensorflow.rstudio.com/keras/articles/eager_guide.html)  
+
+这些[`例子`](https://tensorflow.rstudio.com/keras/articles/examples/index.html)演示了更高级的模型，迁移学习transfer learning,、变分自动编码variational auto-encoding、记忆网络问答question-answering with memory networks、堆叠LSTM的文本生成ext generation with stacked LSTMs   
+
+[参考函数](https://tensorflow.rstudio.com/keras/reference/index.html)包含关于包中可用的所有函数的详细信息。  
+
+**DEEP LEARNING WITH R BOOK**  
+
+如果你想更全面地了解Keras以及深度学习的概念和实践，我们建议您阅读Manning的[《深度学习与R》](Deep Learning with R.pdf)[link](http://www.allitebooks.com/deep-learning-with-r/)一书。这本书是Keras的创始人FranoisChollet和为Keras编写R接口的J.J.Allaire的合作。   
+  
+这本书假定没有关于机器学习和深度学习的重要知识，并且从基础理论一直到高级实际应用，都使用到Keras的R接口。 
+
+
+**为什么叫Keras**   
+Keras在希腊语中是号角的意思，它引用了古希腊和拉丁文学中的文学形象，最早发现于奥德赛，在那里，梦魂（奥奈罗伊，奇异的奥奈罗斯）被分为那些用假象欺骗人的人，那些通过象牙之门来到地球，和那些宣布未来的人。将要通过，谁通过一个号角到达。   
+Keras最初是作为ONEIROS（开放式神经电子智能机器人操作系统）项目的研究成果而开发的。   
+
+“OniRoi是我们无法解释的，谁能确定他们讲述了什么故事？不是所有男人寻找的都会过去。有两扇门通向飞逝的OniRoi；一个是由角构成的，一个是象牙。穿越锯齿象牙的奥奈罗伊人很狡猾，携带着一个无法实现的信息；那些穿越光亮的角落出来的人背后有真理，要为看到它们的人所完成。《荷马，奥德赛》19. 562 ff （剪绞平移）。
+
+
+
